@@ -1,0 +1,439 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Avance por empleado – Control de claves</title>
+
+  <!-- Librería para leer y escribir Excel/CSV (SheetJS) -->
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+
+  <style>
+    :root{
+      --bg:#0f172a;          /* fondo */
+      --card:#111827;        /* tarjetas */
+      --muted:#9ca3af;       /* texto atenuado */
+      --text:#e5e7eb;        /* texto principal */
+      --primary:#22c55e;     /* verde progreso */
+      --primary-weak:#14532d;
+      --accent:#38bdf8;      /* azul acento */
+      --danger:#f87171;      /* rojo */
+      --border:#1f2937;
+      --focus:#fbbf24;
+    }
+    *{box-sizing:border-box}
+    html,body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,"Helvetica Neue",Arial}
+    header{padding:16px 20px;border-bottom:1px solid var(--border);position:sticky;top:0;background:linear-gradient(180deg,rgba(15,23,42,.95),rgba(15,23,42,.85) 60%,rgba(15,23,42,0))}
+    h1{margin:0;font-size:clamp(18px,3vw,22px);font-weight:700;letter-spacing:.2px}
+    .sub{color:var(--muted);font-size:13px;margin-top:6px}
+    .wrap{max-width:1100px;margin:0 auto;padding:18px}
+
+    .toolbar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin:16px 0 10px}
+    .file{display:flex;align-items:center;gap:8px}
+    input[type="file"]{background:var(--card);border:1px dashed var(--border);color:var(--muted);padding:10px;border-radius:10px}
+    .btn{background:var(--accent);color:#052231;border:0;padding:10px 14px;border-radius:10px;cursor:pointer;font-weight:600}
+    .btn:disabled{opacity:.5;cursor:not-allowed}
+    .btn-secondary{background:#1f2937;color:var(--text);border:1px solid var(--border)}
+    .btn-danger{background:var(--danger);color:#2a0a0a}
+    .filters{margin-left:auto;display:flex;gap:8px;flex-wrap:wrap}
+    .search{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:10px 12px;color:var(--text);min-width:230px}
+    .select{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:10px 12px;color:var(--text)}
+
+    .grid{display:grid;grid-template-columns:1fr;gap:10px}
+    @media(min-width:720px){.grid{grid-template-columns:1fr 1fr}}
+    @media(min-width:1024px){.grid{grid-template-columns:1fr 1fr 1fr}}
+
+    .card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:14px}
+    .row{display:flex;gap:12px;align-items:center}
+    .avatar{width:40px;height:40px;border-radius:50%;display:grid;place-items:center;font-weight:800;background:#0b1222;border:1px solid var(--border);color:#98c3ff}
+    .emp{flex:1;min-width:0}
+    .name{font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .muted{color:var(--muted);font-size:12px}
+    .pct{font-weight:800;min-width:46px;text-align:right}
+    .bar{height:8px;background:#0b1222;border:1px solid var(--border);border-radius:999px;overflow:hidden;margin-top:8px}
+    .bar>span{display:block;height:100%;background:linear-gradient(90deg,var(--primary),#34d399);width:0%}
+    .toggle{margin-left:6px;background:#101826;border:1px solid var(--border);color:var(--text);padding:8px 10px;border-radius:10px;cursor:pointer}
+    .toggle:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+
+    .panel{margin-top:12px;padding-top:12px;border-top:1px dashed var(--border);display:none}
+    .kv{display:flex;align-items:center;gap:8px;padding:8px;border-radius:10px}
+    .kv:hover{background:#0e1528}
+    .kv .clave{font-family:ui-monospace,Menlo,Consolas,monospace;font-weight:600}
+    .tag{font-size:11px;border:1px solid var(--border);padding:2px 6px;border-radius:999px;color:var(--muted)}
+
+    .empty{padding:28px;text-align:center;border:1px dashed var(--border);border-radius:14px;color:var(--muted)}
+    .err{background:#2a0a0a;border:1px solid #4c1515;color:#ffd3d3;padding:10px;border-radius:10px;margin:10px 0}
+    .footer{margin:16px 0;color:var(--muted);font-size:12px}
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Control de avance por empleado</h1>
+    <div class="sub">Carga un Excel o CSV con columnas <strong>Empleado</strong>/<strong>Nombre</strong>, <strong>Clave</strong>/<strong>Código</strong> y opcionalmente <strong>Estatus</strong>/<strong>Estado</strong>/<strong>Avance</strong>.</div>
+  </header>
+
+  <div class="wrap">
+    <div class="toolbar">
+      <div class="file">
+        <input id="file" type="file" accept=".xlsx,.xls,.csv" />
+        <button id="demo" class="btn-secondary">Cargar demo</button>
+      </div>
+      <div class="filters">
+        <input id="q" class="search" placeholder="Buscar empleado…" />
+        <select id="sort" class="select" title="Ordenar">
+          <option value="name-asc">Nombre (A→Z)</option>
+          <option value="name-desc">Nombre (Z→A)</option>
+          <option value="pct-desc" selected>Avance (mayor a menor)</option>
+          <option value="pct-asc">Avance (menor a mayor)</option>
+        </select>
+        <select id="pctFilter" class="select" title="Filtrar por avance">
+          <option value="all" selected>Todos los avances</option>
+          <option value="0-24">0–24%</option>
+          <option value="25-49">25–49%</option>
+          <option value="50-74">50–74%</option>
+          <option value="75-99">75–99%</option>
+          <option value="100-100">100%</option>
+        </select>
+        <button id="export" class="btn" disabled>Exportar Excel</button>
+        <button id="clear" class="btn-danger" disabled>Limpiar</button>
+      </div>
+    </div>
+
+    <div id="errors"></div>
+    <div id="stats" class="muted" style="margin:8px 2px 12px;"></div>
+    <div id="list" class="grid"></div>
+    <div id="empty" class="empty">Carga un archivo para ver empleados y claves…</div>
+
+    <div class="footer">
+      <span class="tag">Local</span> No sube nada a internet. Todo se procesa en tu navegador.
+    </div>
+  </div>
+
+<script>
+(() => {
+  // ---------- Estado en memoria ----------
+  let employees = [];   // [{ name, claves: [{clave, completo, fuente}], pct }]
+  let rawRows = [];     // filas originales parseadas (para poder exportar)
+  let fileName = 'avance.xlsx';
+
+  // ---------- Utilidades ----------
+  const $ = sel => document.querySelector(sel);
+  const $on = (el, ev, fn) => el.addEventListener(ev, fn);
+  const norm = v => (v ?? '').toString().trim();
+  const normalizeHeader = h => norm(h).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,'');
+  const guess = (obj, candidates) => {
+    const keys = Object.keys(obj);
+    const index = keys.findIndex(k => candidates.includes(normalizeHeader(k)));
+    return index >= 0 ? keys[index] : null;
+  };
+
+  function isComplete(val){
+    if (val === undefined || val === null) return false;
+    const t = typeof val;
+    if (t === 'number'){
+      // Si es porcentaje directo
+      if (val >= 100) return true;
+      if (val === 1) return true; // algunos marcan 1/0
+      return false;
+    }
+    const s = norm(val).toLowerCase();
+    if (s === '') return false;
+    if (!isNaN(Number(s))){
+      const n = Number(s);
+      if (n >= 100) return true;
+      if (n === 1) return true;
+      return false;
+    }
+    return /^(si|sí|true|completo|hecho|listo|terminado|finalizado)$/.test(s);
+  }
+
+  function pct(emp){
+    const t = emp.claves.length;
+    if (!t) return 0;
+    const c = emp.claves.filter(k => k.completo).length;
+    return Math.round((c*100)/t);
+  }
+
+  function initials(name){
+    const parts = norm(name).split(/\s+/).filter(Boolean);
+    const a = parts[0]?.[0] ?? '';
+    const b = parts[1]?.[0] ?? '';
+    return (a+b).toUpperCase() || 'Ø';
+  }
+
+  function showError(msg){
+    const div = document.createElement('div');
+    div.className = 'err';
+    div.textContent = msg;
+    $('#errors').appendChild(div);
+    setTimeout(()=>div.remove(), 7000);
+  }
+
+  // ---------- Render ----------
+  function render(){
+    const list = $('#list');
+    list.innerHTML = '';
+    const q = $('#q').value.toLowerCase();
+    const sort = $('#sort').value;
+    const pf = $('#pctFilter').value;
+
+    let data = employees.slice();
+
+    // filtro por búsqueda
+    if (q) data = data.filter(e => e.name.toLowerCase().includes(q));
+
+    // filtro por rango %
+    if (pf !== 'all'){
+      const [a,b] = pf.split('-').map(Number);
+      data = data.filter(e => e.pct >= a && e.pct <= b);
+    }
+
+    // sort
+    data.sort((a,b)=>{
+      if (sort === 'name-asc') return a.name.localeCompare(b.name, 'es');
+      if (sort === 'name-desc') return b.name.localeCompare(a.name, 'es');
+      if (sort === 'pct-asc') return a.pct - b.pct;
+      if (sort === 'pct-desc') return b.pct - a.pct;
+      return 0;
+    });
+
+    // stats
+    const totalEmp = employees.length;
+    const prom = totalEmp? Math.round(data.reduce((s,e)=>s+e.pct,0)/data.length) : 0;
+    $('#stats').textContent = totalEmp
+      ? `Empleados: ${data.length}/${totalEmp} · Avance promedio (vista): ${prom}%`
+      : '';
+
+    if (!data.length){
+      $('#empty').style.display = 'block';
+      return;
+    } else {
+      $('#empty').style.display = 'none';
+    }
+
+    for (const e of data){
+      const card = document.createElement('div');
+      card.className = 'card';
+
+      const row = document.createElement('div');
+      row.className = 'row';
+
+      const av = document.createElement('div');
+      av.className = 'avatar';
+      av.textContent = initials(e.name);
+
+      const emp = document.createElement('div');
+      emp.className = 'emp';
+      const nm = document.createElement('div');
+      nm.className = 'name';
+      nm.textContent = e.name;
+      const meta = document.createElement('div');
+      meta.className = 'muted';
+      meta.textContent = `${e.claves.filter(c=>c.completo).length}/${e.claves.length} claves`;
+      const bar = document.createElement('div');
+      bar.className = 'bar';
+      const fill = document.createElement('span');
+      fill.style.width = `${e.pct}%`;
+      bar.appendChild(fill);
+      emp.appendChild(nm);
+      emp.appendChild(meta);
+      emp.appendChild(bar);
+
+      const pctEl = document.createElement('div');
+      pctEl.className = 'pct';
+      pctEl.textContent = `${e.pct}%`;
+
+      const btn = document.createElement('button');
+      btn.className = 'toggle';
+      btn.textContent = 'Ver claves';
+      btn.setAttribute('aria-expanded','false');
+      btn.onclick = () => {
+        const open = panel.style.display === 'block';
+        panel.style.display = open ? 'none' : 'block';
+        btn.textContent = open ? 'Ver claves' : 'Ocultar claves';
+        btn.setAttribute('aria-expanded', String(!open));
+      };
+
+      row.appendChild(av);
+      row.appendChild(emp);
+      row.appendChild(pctEl);
+      row.appendChild(btn);
+
+      const panel = document.createElement('div');
+      panel.className = 'panel';
+
+      // claves
+      for (let i=0;i<e.claves.length;i++){
+        const item = e.claves[i];
+        const kv = document.createElement('div');
+        kv.className = 'kv';
+
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.checked = item.completo;
+        cb.onchange = () => {
+          item.completo = cb.checked;
+          // actualizar % y UI de este card
+          e.pct = pct(e);
+          fill.style.width = `${e.pct}%`;
+          pctEl.textContent = `${e.pct}%`;
+          meta.textContent = `${e.claves.filter(c=>c.completo).length}/${e.claves.length} claves`;
+        };
+
+        const code = document.createElement('div');
+        code.className = 'clave';
+        code.textContent = norm(item.clave) || '(sin clave)';
+
+        const tag = document.createElement('span');
+        tag.className = 'tag';
+        tag.textContent = item.completo ? 'Completada' : 'Pendiente';
+        const updateTag = () => tag.textContent = cb.checked ? 'Completada' : 'Pendiente';
+        cb.addEventListener('change', updateTag);
+
+        kv.appendChild(cb);
+        kv.appendChild(code);
+        kv.appendChild(tag);
+        panel.appendChild(kv);
+      }
+
+      card.appendChild(row);
+      card.appendChild(panel);
+      list.appendChild(card);
+    }
+  }
+
+  // ---------- Parseo de archivo ----------
+  function handleWorkbook(wb){
+    try{
+      const first = wb.SheetNames[0];
+      const sheet = wb.Sheets[first];
+      const rows = XLSX.utils.sheet_to_json(sheet, {defval: '', raw: true});
+      rawRows = rows;
+      if (!rows.length) {
+        showError('La hoja está vacía.');
+        return;
+      }
+
+      // Detección de columnas
+      const sample = rows[0];
+      const empCol = guess(sample, ['empleado','nombre','trabajador','persona']);
+      const claveCol = guess(sample, ['clave','codigo','código','id','folio']);
+      const estCol = guess(sample, ['estatus','estado','avance','completo','realizado']);
+      if (!empCol || !claveCol){
+        showError('No se encontraron las columnas requeridas: "Empleado/Nombre" y "Clave/Código".');
+        return;
+      }
+
+      // Agrupar por empleado
+      const map = new Map();
+      for (const r of rows){
+        const name = norm(r[empCol]);
+        const clave = norm(r[claveCol]);
+        if (!name) continue; // saltar filas sin empleado
+        const completo = estCol ? isComplete(r[estCol]) : false;
+
+        if (!map.has(name)) map.set(name, []);
+        map.get(name).push({ clave, completo, fuente: { empCol, claveCol, estCol }});
+      }
+
+      employees = Array.from(map.entries()).map(([name, claves]) => ({
+        name, claves, pct: 0
+      })).map(e => ({...e, pct: pct(e)}));
+
+      $('#export').disabled = employees.length === 0;
+      $('#clear').disabled = employees.length === 0;
+      $('#empty').style.display = employees.length ? 'none' : 'block';
+      $('#errors').innerHTML = '';
+      render();
+    }catch(err){
+      console.error(err);
+      showError('No se pudo leer el archivo. Verifica que sea .xlsx, .xls o .csv válido.');
+    }
+  }
+
+  async function handleFile(file){
+    fileName = file.name.replace(/\.(csv|xlsx|xls)$/i,'') + '_actualizado.xlsx';
+    const reader = new FileReader();
+    reader.onload = e => {
+      const data = new Uint8Array(e.target.result);
+      const wb = XLSX.read(data, {type:'array'});
+      handleWorkbook(wb);
+    };
+    if (/\.(csv)$/i.test(file.name)){
+      reader.onload = e => {
+        const text = e.target.result;
+        const wb = XLSX.read(text, {type:'string'});
+        handleWorkbook(wb);
+      };
+      reader.readAsText(file, 'utf-8');
+    } else {
+      reader.readAsArrayBuffer(file);
+    }
+  }
+
+  // ---------- Exportar ----------
+  function exportExcel(){
+    if (!employees.length) return;
+
+    // Generamos filas "planas" a partir del estado actual en UI
+    const outRows = [];
+    for (const e of employees){
+      for (const k of e.claves){
+        outRows.push({
+          Empleado: e.name,
+          Clave: k.clave,
+          Estatus: k.completo ? 'Completada' : 'Pendiente',
+          AvancePorEmpleado: e.pct + '%'
+        });
+      }
+    }
+    const ws = XLSX.utils.json_to_sheet(outRows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Avance');
+    XLSX.writeFile(wb, fileName);
+  }
+
+  // ---------- Demo ----------
+  function loadDemo(){
+    const demo = [
+      {Empleado:'Ana López', Clave:'K-101', Estatus:'Sí'},
+      {Empleado:'Ana López', Clave:'K-102', Estatus:''},
+      {Empleado:'Ana López', Clave:'K-103', Estatus:'Hecho'},
+      {Empleado:'Carlos Pérez', Clave:'A-01', Estatus:'0'},
+      {Empleado:'Carlos Pérez', Clave:'A-02', Estatus:'1'},
+      {Empleado:'Carlos Pérez', Clave:'A-03', Estatus:'0'},
+      {Empleado:'María Reyes', Clave:'Z-9', Avance:100},
+      {Empleado:'María Reyes', Clave:'Z-10', Avance:0},
+      {Empleado:'María Reyes', Clave:'Z-11', Avance:0},
+    ];
+    const ws = XLSX.utils.json_to_sheet(demo);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Datos');
+    handleWorkbook(wb);
+  }
+
+  // ---------- Eventos ----------
+  $on($('#file'), 'change', e => {
+    const f = e.target.files?.[0];
+    if (f) handleFile(f);
+  });
+  $on($('#q'), 'input', render);
+  $on($('#sort'), 'change', render);
+  $on($('#pctFilter'), 'change', render);
+  $on($('#export'), 'click', exportExcel);
+  $on($('#clear'), 'click', () => {
+    employees = [];
+    rawRows = [];
+    $('#file').value = '';
+    $('#export').disabled = true;
+    $('#clear').disabled = true;
+    $('#stats').textContent = '';
+    $('#list').innerHTML = '';
+    $('#empty').style.display = 'block';
+  });
+  $on($('#demo'), 'click', loadDemo);
+
+})();
+</script>
+</body>
+</html>
